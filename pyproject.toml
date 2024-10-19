@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "kraken-pp-parser"
+version = "0.1.0"
+description = ""
+authors = ["kianenigma <kian@parity.io>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+pandas = "2.2.3"
+numpy = "2.1.2"
+requests = "^2.26.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
