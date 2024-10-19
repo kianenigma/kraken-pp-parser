@@ -1,17 +1,39 @@
 import pandas as pd
 import numpy as np
 from typing import List, Dict, Any
-import requests
 import json
 from csv import DictWriter
+import argparse
+import sys
 
 def main():
-    historical = pd.read_csv("All_historical_Quotes.csv")
-    trades = pd.read_csv("trades.csv")
+    parser = argparse.ArgumentParser(description="Process trades and historical quotes.")
+    parser.add_argument('-t', '--trades', required=True, help='Path to the trades CSV file')
+    parser.add_argument('-q', '--quotes', required=True, help='Path to the historical quotes CSV file')
+    parser.add_argument('-o', '--out', help='Path to the output CSV file (optional)')
 
-    process_rows(trades, historical)
+    args = parser.parse_args()
 
-def process_rows(rows: pd.DataFrame, historical: pd.DataFrame):
+    try:
+        historical = pd.read_csv(args.quotes)
+    except Exception as e:
+        print(f"Error reading historical quotes file: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        trades = pd.read_csv(args.trades)
+    except Exception as e:
+        print(f"Error reading trades file: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    reformed = process_rows(trades, historical)
+
+    if args.out:
+        with open(args.out, mode="w") as f:
+            write_output(reformed, f)
+    write_output(reformed, sys.stdout)
+
+def process_rows(rows: pd.DataFrame, historical: pd.DataFrame) -> List[Dict[str, Any]]:
     txs = {}
     for index, row in rows.iterrows():
         pair = row["pair"].split("/")
@@ -37,8 +59,8 @@ def process_rows(rows: pd.DataFrame, historical: pd.DataFrame):
     reformed = []
     for tx in txs:
         if tx["pair"][0] == "EUR":
-            print("cannot happen")
-            exit(1)
+            print("cannot happen", file=sys.stderr)
+            sys.exit(1)
         elif tx["pair"][1] == "EUR":
             record = {"type": tx["type"], "ticker symbol": tx["pair"][0], "shares": tx["vol"], "exchange rate": tx["price"], "date": tx["date"]}
             reformed.append(record)
@@ -51,57 +73,26 @@ def process_rows(rows: pd.DataFrame, historical: pd.DataFrame):
             p1_action = "buy" if p0_action == "sell" else "sell"
 
             if p0_price == 0 or p1_price == 0:
-                print("Could not find the asset value for {} on {}".format(tx["bought"], tx["date"]))
-                exit(1)
+                print(f"Could not find the asset value for {tx['pair']} on {tx['date']}", file=sys.stderr)
+                sys.exit(1)
 
             p0_record = {"type": p0_action, "ticker symbol": tx["pair"][0], "shares": p0_amount, "exchange rate": p0_price, "date": tx["date"]}
             p1_record = {"type": p1_action, "ticker symbol": tx["pair"][1], "shares": p1_amount, "exchange rate": p1_price, "date": tx["date"]}
             reformed.append(p0_record)
             reformed.append(p1_record)
 
-    for t in reformed:
-        print(t)
-
     for tx in reformed:
         tx["value"] = tx["exchange rate"] * tx["shares"]
 
-    w = DictWriter(open("out.pp.csv", mode="w"), reformed[0].keys())
+    return reformed
+
+def write_output(reformed: List[Dict[str, Any]], output):
+    w = DictWriter(output, reformed[0].keys())
     w.writeheader()
     w.writerows(reformed)
 
-
 def clean_number(num_str):
     return float(num_str.replace(',', ''))
-
-base_url = "https://api.kraken.com/0/public/OHLC"
-payload = {}
-headers = {
-    'Accept': 'application/json'
-}
-cache = {}
-
-def get_asset_value_remote(date: str, asset: str):
-    print("Date not found in the historical data {} {}".format(date, asset))
-    ts = pd.to_datetime(date).timestamp()
-    pair = "{}EUR".format(asset)
-    query = "{}?pair={}&since={}&interval=1440".format(base_url, pair, int(ts - 10000))
-    print(int(ts), query)
-    response = requests.request("GET", query, headers=headers, data=payload)
-
-    response_data = json.loads(response.text)
-
-    target_date = pd.to_datetime(date)
-
-    for item in response_data['result'][pair]:
-        item_timestamp = item[0]
-        item_date = pd.to_datetime(item_timestamp, unit='s')
-
-        print(item_date.date(), target_date.date())
-        if item_date.date() == target_date.date():
-            return float(item[1])
-
-    print("No matching date found in the response.")
-    return None
 
 def get_asset_value_local(historical: pd.DataFrame, date: str, asset: str):
     row = historical.loc[historical['Date'] == date]
@@ -119,18 +110,11 @@ def get_asset_value_local(historical: pd.DataFrame, date: str, asset: str):
 
 def get_asset_value(historical: pd.DataFrame, date: str, asset: str):
     local = get_asset_value_local(historical, date, asset)
-    if local != None:
+    if local is not None:
         return local
     else:
-        print(asset, date)
-        exit(1)
-        remote = get_asset_value_remote(date, asset)
-        if remote != None:
-            return remote
-        else:
-            print("Could not find the asset value for {} on {}".format(asset, date))
-            return exit(1)
-
+        print(f"Asset value not found for {asset} on {date}. Please update the --quotes file.", file=sys.stderr)
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
